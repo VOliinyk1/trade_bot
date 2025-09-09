@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  crypto-bot:
+    build: .
+    container_name: crypto-trading-bot
+    restart: unless-stopped
+    environment:
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
+      - TRADING_PAIRS=${TRADING_PAIRS:-BTCUSDT,ETHUSDT,BNBUSDT,ADAUSDT,SOLUSDT}
+      - ANALYSIS_INTERVAL=${ANALYSIS_INTERVAL:-300}
+      - SIGNAL_THRESHOLD=${SIGNAL_THRESHOLD:-0.7}
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - crypto-bot-network
+
+networks:
+  crypto-bot-network:
+    driver: bridge
