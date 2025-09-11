@@ -154,6 +154,9 @@ class TelegramBot:
 📰 **СЕНТИМЕНТ РИНКУ:** {market_sentiment.get('sentiment', 'NEUTRAL')}
 📊 **ОЦІНКА:** {market_sentiment.get('score', 0):.2f}
 
+🤖 **СЕНТИМЕНТ ChatGPT:** {analysis.get('sentiment', 'NEUTRAL')}
+🎯 **ОЦІНКА GPT:** {analysis.get('sentiment_score', 0):.2f}
+
 ⏰ **ЧАС:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 ⚠️ **ВАЖЛИВО:** Це не фінансова порада. Торгуйте на свій ризик!

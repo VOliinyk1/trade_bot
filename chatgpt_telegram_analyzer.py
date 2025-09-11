@@ -1,20 +1,22 @@
 import openai
 from typing import Dict, List
 import json
+from datetime import datetime
 from config import OPENAI_API_KEY
 
-class ChatGPTAnalyzer:
+class ChatGPTTelegramAnalyzer:
     def __init__(self):
         openai.api_key = OPENAI_API_KEY
         self.client = openai.OpenAI(api_key=OPENAI_API_KEY)
     
-    def analyze_trading_opportunity(self, symbol: str, technical_data: Dict, news_data: str, market_sentiment: Dict) -> Dict:
-        """Аналізувати торгову можливість з ChatGPT"""
+    async def analyze_trading_opportunity(self, symbol: str, technical_data: Dict, news_data: str, market_sentiment: Dict, telegram_bot=None) -> Dict:
+        """Аналізувати торгову можливість з ChatGPT та надсилати повідомлення в Telegram"""
         
-        # Спочатку пробуємо ChatGPT
         try:
-            # Формуємо промпт для ChatGPT
-            prompt = self._create_analysis_prompt(symbol, technical_data, news_data, market_sentiment)
+            # Формуємо детальний промпт для ChatGPT
+            prompt = self._create_detailed_analysis_prompt(symbol, technical_data, news_data, market_sentiment)
+            
+            print(f"🤖 ChatGPT аналіз {symbol}...")
             
             response = self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
@@ -22,15 +24,15 @@ class ChatGPTAnalyzer:
                     {
                         "role": "system",
                         "content": """Ти професійний криптоаналітик з 10+ років досвіду. 
-                        Твоя задача - проаналізувати торгову можливість та дати чіткі рекомендації.
-                        Відповідай структуровано та обґрунтовано."""
+                        Твоя задача - проаналізувати торгову можливість та дати детальні рекомендації.
+                        Відповідай структуровано, обґрунтовано та зрозуміло для трейдера."""
                     },
                     {
                         "role": "user",
                         "content": prompt
                     }
                 ],
-                max_tokens=1000,
+                max_tokens=1500,
                 temperature=0.3
             )
             
@@ -39,15 +41,25 @@ class ChatGPTAnalyzer:
             # Парсимо відповідь для отримання структурованих даних
             structured_analysis = self._parse_analysis_response(analysis_text, symbol, technical_data)
             
+            # Надсилаємо детальний аналіз в Telegram
+            if telegram_bot:
+                await self._send_chatgpt_analysis_to_telegram(telegram_bot, symbol, analysis_text, structured_analysis)
+            
             return structured_analysis
             
         except Exception as e:
             print(f"Помилка аналізу ChatGPT для {symbol}: {e}")
-            # Використовуємо розширений fallback аналіз
-            return self._get_enhanced_fallback_analysis(symbol, technical_data, market_sentiment)
+            # Використовуємо fallback аналіз
+            fallback_analysis = self._get_enhanced_fallback_analysis(symbol, technical_data, market_sentiment)
+            
+            # Надсилаємо fallback повідомлення
+            if telegram_bot:
+                await self._send_fallback_analysis_to_telegram(telegram_bot, symbol, fallback_analysis, str(e))
+            
+            return fallback_analysis
     
-    def _create_analysis_prompt(self, symbol: str, technical_data: Dict, news_data: str, market_sentiment: Dict) -> str:
-        """Створити промпт для аналізу"""
+    def _create_detailed_analysis_prompt(self, symbol: str, technical_data: Dict, news_data: str, market_sentiment: Dict) -> str:
+        """Створити детальний промпт для аналізу"""
         
         prompt = f"""
         Проаналізуй торгову можливість для {symbol} на основі наступних даних:
@@ -61,6 +73,7 @@ class ChatGPTAnalyzer:
         - EMA: {technical_data.get('indicators', {}).get('ema', 0):.4f}
         - Сигнали: {technical_data.get('signals', {})}
         - Рекомендація: {technical_data.get('recommendation', 'HOLD')}
+        - Сила сигналу: {technical_data.get('signal_strength', 0)}
 
         📰 **НОВИНИ ТА СЕНТИМЕНТ:**
         {news_data}
@@ -72,11 +85,15 @@ class ChatGPTAnalyzer:
         - Негативні новини: {market_sentiment.get('negative_count', 0)}
 
         **ЗАВДАННЯ:**
-        1. Проаналізуй всі дані та дай оцінку торгової можливості
-        2. Визнач рівень ризику (LOW/MEDIUM/HIGH)
-        3. Рекомендуй розмір позиції (від 0% до 100% від доступного капіталу)
-        4. Встанови цілі входу, Stop Loss та Take Profit
-        5. Обґрунтуй своє рішення
+        1. Дай детальний аналіз поточного стану {symbol}
+        2. Оціни ризики та можливості для BUY позиції
+        3. Визнач рівень ризику (LOW/MEDIUM/HIGH)
+        4. Рекомендуй розмір позиції (від 1% до 5% від доступного капіталу)
+        5. Встанови цілі входу, Stop Loss та Take Profit з урахуванням волатільності
+        6. Stop Loss має бути 2-5% від ціни входу
+        7. Take Profit має бути 3-10% від ціни входу (співвідношення ризик/прибуток 1:1.5 або краще)
+        8. Обґрунтуй своє рішення детально
+        9. Врахуй сентимент ринку в аналізі
 
         **ФОРМАТ ВІДПОВІДІ:**
         РЕКОМЕНДАЦІЯ: [BUY/SELL/HOLD]
@@ -92,11 +109,42 @@ class ChatGPTAnalyzer:
         
         return prompt
     
+    async def _send_chatgpt_analysis_to_telegram(self, telegram_bot, symbol: str, analysis_text: str, structured_analysis: Dict):
+        """Надіслати ChatGPT аналіз в Telegram"""
+        
+        try:
+            # Використовуємо існуючий метод send_trading_signal
+            await telegram_bot.send_trading_signal(
+                analysis=structured_analysis,
+                news_summary=analysis_text[:500] + "..." if len(analysis_text) > 500 else analysis_text,
+                market_sentiment={'sentiment': structured_analysis.get('sentiment', 'NEUTRAL'), 'score': structured_analysis.get('sentiment_score', 0.0)}
+            )
+            
+            print(f"✅ ChatGPT аналіз для {symbol} відправлено в Telegram")
+            
+        except Exception as e:
+            print(f"❌ Помилка відправки ChatGPT аналізу: {e}")
+    
+    async def _send_fallback_analysis_to_telegram(self, telegram_bot, symbol: str, fallback_analysis: Dict, error_message: str):
+        """Надіслати fallback аналіз в Telegram"""
+        
+        try:
+            # Використовуємо існуючий метод send_trading_signal
+            await telegram_bot.send_trading_signal(
+                analysis=fallback_analysis,
+                news_summary=f"⚠️ Fallback аналіз (ChatGPT недоступний: {error_message})",
+                market_sentiment={'sentiment': fallback_analysis.get('sentiment', 'NEUTRAL'), 'score': fallback_analysis.get('sentiment_score', 0.0)}
+            )
+            
+            print(f"✅ Fallback аналіз для {symbol} відправлено в Telegram")
+            
+        except Exception as e:
+            print(f"❌ Помилка відправки fallback аналізу: {e}")
+    
     def _parse_analysis_response(self, response_text: str, symbol: str, technical_data: Dict) -> Dict:
         """Парсити відповідь ChatGPT"""
         
         try:
-            # Базовий парсинг відповіді
             lines = response_text.split('\n')
             
             analysis = {
@@ -166,17 +214,41 @@ class ChatGPTAnalyzer:
                     except:
                         pass
             
-            # Розраховуємо впевненість на основі технічних сигналів
+            # Розраховуємо впевненість
             signal_strength = technical_data.get('signal_strength', 0)
             analysis['confidence'] = min(0.9, 0.5 + (signal_strength * 0.1))
             
-            # Якщо не вдалося розпарсити ціни, використовуємо технічні дані
+            # Якщо не вдалося розпарсити ціни, використовуємо покращені розрахунки
             if analysis['stop_loss'] == 0:
                 current_price = analysis['entry_price']
                 if analysis['recommendation'] == 'BUY':
-                    analysis['stop_loss'] = current_price * 0.95  # -5%
-                    analysis['take_profit'] = current_price * 1.10  # +10%
+                    # Покращені розрахунки для BUY позицій
+                    signal_strength = technical_data.get('signal_strength', 0)
+                    
+                    # Stop Loss: 2-5% залежно від сили сигналу
+                    if signal_strength >= 3:
+                        stop_loss_percent = 0.02  # 2% для сильних сигналів
+                    elif signal_strength >= 2:
+                        stop_loss_percent = 0.03  # 3% для середніх сигналів
+                    else:
+                        stop_loss_percent = 0.05  # 5% для слабких сигналів
+                    
+                    # Take Profit: 1.5-2x від ризику
+                    take_profit_multiplier = 1.8  # Співвідношення ризик/прибуток 1:1.8
+                    
+                    analysis['stop_loss'] = current_price * (1 - stop_loss_percent)
+                    analysis['take_profit'] = current_price * (1 + (stop_loss_percent * take_profit_multiplier))
+                    
+                    # Оновлюємо розмір позиції на основі ризику
+                    if analysis['risk_level'] == 'LOW':
+                        analysis['position_size'] = min(0.05, analysis['position_size'])  # Макс 5%
+                    elif analysis['risk_level'] == 'MEDIUM':
+                        analysis['position_size'] = min(0.03, analysis['position_size'])  # Макс 3%
+                    else:  # HIGH
+                        analysis['position_size'] = min(0.02, analysis['position_size'])  # Макс 2%
+                        
                 elif analysis['recommendation'] == 'SELL':
+                    # Для SELL позицій (хоча ми їх не використовуємо)
                     analysis['stop_loss'] = current_price * 1.05  # +5%
                     analysis['take_profit'] = current_price * 0.90  # -10%
             
@@ -187,12 +259,12 @@ class ChatGPTAnalyzer:
             return self._get_fallback_analysis(symbol, technical_data)
     
     def _get_fallback_analysis(self, symbol: str, technical_data: Dict) -> Dict:
-        """Fallback аналіз якщо ChatGPT недоступний"""
+        """Fallback аналіз"""
         
         recommendation = technical_data.get('recommendation', 'HOLD')
         current_price = technical_data.get('current_price', 0)
         
-        analysis = {
+        return {
             'symbol': symbol,
             'recommendation': recommendation,
             'risk_level': 'MEDIUM',
@@ -202,11 +274,9 @@ class ChatGPTAnalyzer:
             'take_profit': current_price * 1.10 if recommendation == 'BUY' else current_price * 0.90,
             'reasoning': f"Автоматичний аналіз на основі технічних індикаторів. Рекомендація: {recommendation}",
             'confidence': 0.3,
-            'sentiment': market_sentiment.get('sentiment', 'NEUTRAL'),
-            'sentiment_score': market_sentiment.get('score', 0.0)
+            'sentiment': 'NEUTRAL',
+            'sentiment_score': 0.0
         }
-        
-        return analysis
     
     def _get_enhanced_fallback_analysis(self, symbol: str, technical_data: Dict, market_sentiment: Dict) -> Dict:
         """Розширений fallback аналіз з урахуванням сентименту"""
@@ -242,10 +312,30 @@ class ChatGPTAnalyzer:
             recommendation = 'HOLD'
             confidence *= 0.7
         
-        # Розраховуємо ціни
+        # Розраховуємо ціни з покращеними розрахунками
         if recommendation == 'BUY':
-            stop_loss = current_price * 0.95  # -5%
-            take_profit = current_price * 1.10  # +10%
+            # Покращені розрахунки для BUY позицій
+            if signal_strength >= 3:
+                stop_loss_percent = 0.02  # 2% для сильних сигналів
+            elif signal_strength >= 2:
+                stop_loss_percent = 0.03  # 3% для середніх сигналів
+            else:
+                stop_loss_percent = 0.05  # 5% для слабких сигналів
+            
+            # Take Profit: 1.8x від ризику
+            take_profit_multiplier = 1.8
+            
+            stop_loss = current_price * (1 - stop_loss_percent)
+            take_profit = current_price * (1 + (stop_loss_percent * take_profit_multiplier))
+            
+            # Обмежуємо розмір позиції
+            if risk_level == 'LOW':
+                position_size = min(0.05, position_size)  # Макс 5%
+            elif risk_level == 'MEDIUM':
+                position_size = min(0.03, position_size)  # Макс 3%
+            else:  # HIGH
+                position_size = min(0.02, position_size)  # Макс 2%
+                
         elif recommendation == 'SELL':
             stop_loss = current_price * 1.05  # +5%
             take_profit = current_price * 0.90  # -10%
@@ -259,17 +349,11 @@ class ChatGPTAnalyzer:
         reasoning_parts.append(f"Тренд: {trend}")
         reasoning_parts.append(f"Сила сигналу: {signal_strength}")
         reasoning_parts.append(f"Сентимент ринку: {sentiment} ({sentiment_score:.2f})")
-        
-        if signal_strength >= 3:
-            reasoning_parts.append("Сильні технічні сигнали")
-        if sentiment == 'POSITIVE':
-            reasoning_parts.append("Позитивний сентимент ринку")
-        elif sentiment == 'NEGATIVE':
-            reasoning_parts.append("Негативний сентимент ринку")
+        reasoning_parts.append("(Fallback аналіз - ChatGPT недоступний)")
         
         reasoning = ". ".join(reasoning_parts) + "."
         
-        analysis = {
+        return {
             'symbol': symbol,
             'recommendation': recommendation,
             'risk_level': risk_level,
@@ -282,58 +366,3 @@ class ChatGPTAnalyzer:
             'sentiment': sentiment,
             'sentiment_score': sentiment_score
         }
-        
-        return analysis
-    
-    def get_market_overview(self, all_analyses: List[Dict]) -> str:
-        """Отримати загальний огляд ринку"""
-        
-        try:
-            # Підраховуємо статистику
-            total_pairs = len(all_analyses)
-            buy_signals = len([a for a in all_analyses if a.get('recommendation') == 'BUY'])
-            sell_signals = len([a for a in all_analyses if a.get('recommendation') == 'SELL'])
-            hold_signals = len([a for a in all_analyses if a.get('recommendation') == 'HOLD'])
-            
-            # Знаходимо найкращі можливості
-            best_opportunities = sorted(
-                [a for a in all_analyses if a.get('recommendation') in ['BUY', 'SELL']],
-                key=lambda x: x.get('confidence', 0),
-                reverse=True
-            )[:3]
-            
-            prompt = f"""
-            Проаналізуй загальний стан крипто ринку на основі аналізу {total_pairs} торгових пар:
-
-            📊 **СТАТИСТИКА СИГНАЛІВ:**
-            - BUY сигнали: {buy_signals}
-            - SELL сигнали: {sell_signals}
-            - HOLD сигнали: {hold_signals}
-
-            🎯 **НАЙКРАЩІ МОЖЛИВОСТІ:**
-            {json.dumps(best_opportunities, indent=2, ensure_ascii=False)}
-
-            Дай короткий огляд ринку та загальні рекомендації.
-            """
-            
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "Ти професійний криптоаналітик. Дай короткий та зрозумілий огляд ринку."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                max_tokens=500,
-                temperature=0.3
-            )
-            
-            return response.choices[0].message.content
-            
-        except Exception as e:
-            print(f"Помилка отримання огляду ринку: {e}")
-            return f"Загальний огляд ринку: {buy_signals} BUY, {sell_signals} SELL, {hold_signals} HOLD сигналів з {total_pairs} пар."
