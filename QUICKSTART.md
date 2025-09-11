@@ -3,6 +3,21 @@
 ## ⚡ Швидке встановлення (5 хвилин)
 
 ### 1. Встановлення
+
+#### Windows (рекомендовано):
+```cmd
+# Клонуйте репозиторій
+git clone <repository-url>
+cd crypto-trading-bot
+
+# Встановлення через batch файл
+install_windows.bat
+
+# АБО через PowerShell
+powershell -ExecutionPolicy Bypass -File install_windows.ps1
+```
+
+#### Linux/Mac:
 ```bash
 # Клонуйте репозиторій
 git clone <repository-url>
@@ -10,6 +25,13 @@ cd crypto-trading-bot
 
 # Автоматичне встановлення
 python install.py
+```
+
+#### Якщо виникають проблеми з встановленням:
+```cmd
+# Встановлення по одній залежності
+pip install fastapi uvicorn python-binance aiogram openai requests python-dotenv beautifulsoup4 feedparser aiohttp
+pip install numpy pandas ta
 ```
 
 ### 2. Налаштування API ключів

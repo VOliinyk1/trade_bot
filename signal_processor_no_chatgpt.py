@@ -7,16 +7,14 @@ import json
 from binance_client import BinanceClient
 from technical_analysis import TechnicalAnalyzer
 from news_aggregator import NewsAggregator
-from chatgpt_analyzer import ChatGPTAnalyzer
 from telegram_bot import TelegramBot
 from config import TRADING_PAIRS, ANALYSIS_INTERVAL, SIGNAL_THRESHOLD
 
-class SignalProcessor:
+class SignalProcessorNoChatGPT:
     def __init__(self):
         self.binance_client = BinanceClient()
         self.technical_analyzer = TechnicalAnalyzer()
         self.news_aggregator = NewsAggregator()
-        self.chatgpt_analyzer = ChatGPTAnalyzer()
         self.telegram_bot = TelegramBot()
         
         self.trading_pairs = TRADING_PAIRS
@@ -30,7 +28,7 @@ class SignalProcessor:
     async def start_analysis_loop(self):
         """Запустити основний цикл аналізу"""
         self.is_running = True
-        print("🚀 Запуск аналізу торгових сигналів...")
+        print("🚀 Запуск аналізу торгових сигналів (без ChatGPT)...")
         
         while self.is_running:
             try:
@@ -58,13 +56,13 @@ class SignalProcessor:
         news_summary = self.news_aggregator.get_news_summary()
         market_sentiment = self.news_aggregator.get_sentiment_analysis()
         
-        # Спочатку робимо технічний аналіз для всіх пар
-        all_technical_analyses = []
-        potential_signals = []
+        # Аналізуємо кожну пару
+        all_analyses = []
+        strong_signals = []
         
         for symbol, data in all_data.items():
             try:
-                print(f"🔍 Технічний аналіз {symbol}...")
+                print(f"🔍 Аналіз {symbol}...")
                 
                 # Технічний аналіз
                 technical_analysis = self.technical_analyzer.get_analysis_summary(
@@ -74,66 +72,23 @@ class SignalProcessor:
                 if not technical_analysis:
                     continue
                 
-                all_technical_analyses.append({
-                    'symbol': symbol,
-                    'technical': technical_analysis
-                })
+                # Створюємо аналіз без ChatGPT
+                analysis = self._create_analysis_without_chatgpt(
+                    symbol, technical_analysis, market_sentiment
+                )
                 
-                # Перевіряємо чи є потенційний сигнал для ChatGPT аналізу
-                if self._is_potential_signal(technical_analysis):
-                    potential_signals.append({
-                        'symbol': symbol,
-                        'technical': technical_analysis
-                    })
-                    print(f"🎯 {symbol}: знайдено потенційний сигнал для ChatGPT аналізу")
+                all_analyses.append(analysis)
+                
+                # Перевіряємо чи є сильний сигнал
+                if self._is_strong_signal(analysis):
+                    strong_signals.append(analysis)
                 
                 # Невелика затримка між аналізами
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.5)
                 
             except Exception as e:
-                print(f"❌ Помилка технічного аналізу {symbol}: {e}")
+                print(f"❌ Помилка аналізу {symbol}: {e}")
                 continue
-        
-        # Тепер аналізуємо тільки потенційні сигнали через ChatGPT
-        all_analyses = []
-        strong_signals = []
-        
-        if potential_signals:
-            print(f"🤖 ChatGPT аналіз для {len(potential_signals)} потенційних сигналів...")
-            
-            for signal_data in potential_signals:
-                symbol = signal_data['symbol']
-                technical_analysis = signal_data['technical']
-                
-                try:
-                    print(f"🧠 ChatGPT аналіз {symbol}...")
-                    
-                    # ChatGPT аналіз тільки для потенційних сигналів
-                    analysis = self.chatgpt_analyzer.analyze_trading_opportunity(
-                        symbol, technical_analysis, news_summary, market_sentiment
-                    )
-                    
-                    all_analyses.append(analysis)
-                    
-                    # Перевіряємо чи є сильний сигнал
-                    if self._is_strong_signal(analysis):
-                        strong_signals.append(analysis)
-                        print(f"📈 {symbol}: знайдено сильний сигнал!")
-                    
-                    # Затримка між ChatGPT запитами
-                    await asyncio.sleep(1)
-                    
-                except Exception as e:
-                    print(f"❌ Помилка ChatGPT аналізу {symbol}: {e}")
-                    # Використовуємо fallback аналіз
-                    fallback_analysis = self._create_fallback_analysis(symbol, technical_analysis, market_sentiment)
-                    all_analyses.append(fallback_analysis)
-                    
-                    if self._is_strong_signal(fallback_analysis):
-                        strong_signals.append(fallback_analysis)
-                    continue
-        else:
-            print("ℹ️ Потенційних сигналів для ChatGPT аналізу не знайдено")
         
         # Відправляємо сильні сигнали
         if strong_signals:
@@ -144,54 +99,15 @@ class SignalProcessor:
         if self._should_send_market_overview():
             await self._send_market_overview(all_analyses)
         
-        print(f"✅ Аналіз завершено. Проаналізовано {len(all_technical_analyses)} пар, ChatGPT аналіз: {len(potential_signals)}, знайдено {len(strong_signals)} сигналів")
+        print(f"✅ Аналіз завершено. Проаналізовано {len(all_analyses)} пар, знайдено {len(strong_signals)} сигналів")
     
-    def _is_potential_signal(self, technical_analysis: Dict) -> bool:
-        """Перевірити чи є це потенційний сигнал для ChatGPT аналізу"""
+    def _create_analysis_without_chatgpt(self, symbol: str, technical_data: Dict, market_sentiment: Dict) -> Dict:
+        """Створити аналіз без ChatGPT"""
         
-        recommendation = technical_analysis.get('recommendation', 'HOLD')
-        signal_strength = technical_analysis.get('signal_strength', 0)
-        trend = technical_analysis.get('trend', 'NEUTRAL')
-        
-        # Критерії потенційного сигналу (менш строгі ніж для сильного сигналу)
-        if recommendation in ['BUY', 'SELL']:
-            if signal_strength >= 1:  # Мінімум 1 технічний сигнал
-                return True
-        
-        # Також перевіряємо сильні тренди
-        if trend in ['STRONG_UP', 'STRONG_DOWN']:
-            return True
-        
-        return False
-    
-    def _is_strong_signal(self, analysis: Dict) -> bool:
-        """Перевірити чи є це сильний сигнал"""
-        
-        recommendation = analysis.get('recommendation', 'HOLD')
-        confidence = analysis.get('confidence', 0)
-        signal_strength = analysis.get('signal_strength', 0)
-        
-        # Перевіряємо чи не відправляли цей сигнал нещодавно
-        signal_key = f"{analysis['symbol']}_{recommendation}_{datetime.now().strftime('%Y%m%d%H')}"
-        if signal_key in self.sent_signals:
-            return False
-        
-        # Критерії сильного сигналу
-        if recommendation in ['BUY', 'SELL']:
-            if confidence >= self.signal_threshold:
-                if signal_strength >= 2:  # Мінімум 2 технічних сигнали
-                    self.sent_signals.add(signal_key)
-                    return True
-        
-        return False
-    
-    def _create_fallback_analysis(self, symbol: str, technical_analysis: Dict, market_sentiment: Dict) -> Dict:
-        """Створити fallback аналіз без ChatGPT"""
-        
-        recommendation = technical_analysis.get('recommendation', 'HOLD')
-        current_price = technical_analysis.get('current_price', 0)
-        signal_strength = technical_analysis.get('signal_strength', 0)
-        trend = technical_analysis.get('trend', 'NEUTRAL')
+        recommendation = technical_data.get('recommendation', 'HOLD')
+        current_price = technical_data.get('current_price', 0)
+        signal_strength = technical_data.get('signal_strength', 0)
+        trend = technical_data.get('trend', 'NEUTRAL')
         
         # Аналізуємо сентимент ринку
         sentiment_score = market_sentiment.get('score', 0)
@@ -236,7 +152,13 @@ class SignalProcessor:
         reasoning_parts.append(f"Тренд: {trend}")
         reasoning_parts.append(f"Сила сигналу: {signal_strength}")
         reasoning_parts.append(f"Сентимент ринку: {sentiment} ({sentiment_score:.2f})")
-        reasoning_parts.append("(Fallback аналіз - ChatGPT недоступний)")
+        
+        if signal_strength >= 3:
+            reasoning_parts.append("Сильні технічні сигнали")
+        if sentiment == 'POSITIVE':
+            reasoning_parts.append("Позитивний сентимент ринку")
+        elif sentiment == 'NEGATIVE':
+            reasoning_parts.append("Негативний сентимент ринку")
         
         reasoning = ". ".join(reasoning_parts) + "."
         
@@ -249,11 +171,29 @@ class SignalProcessor:
             'stop_loss': stop_loss,
             'take_profit': take_profit,
             'reasoning': reasoning,
-            'confidence': confidence,
-            'signal_strength': signal_strength
+            'confidence': confidence
         }
         
         return analysis
+    
+    def _is_strong_signal(self, analysis: Dict) -> bool:
+        """Перевірити чи є це сильний сигнал"""
+        
+        recommendation = analysis.get('recommendation', 'HOLD')
+        confidence = analysis.get('confidence', 0)
+        
+        # Перевіряємо чи не відправляли цей сигнал нещодавно
+        signal_key = f"{analysis['symbol']}_{recommendation}_{datetime.now().strftime('%Y%m%d%H')}"
+        if signal_key in self.sent_signals:
+            return False
+        
+        # Критерії сильного сигналу
+        if recommendation in ['BUY', 'SELL']:
+            if confidence >= self.signal_threshold:
+                self.sent_signals.add(signal_key)
+                return True
+        
+        return False
     
     async def _send_strong_signals(self, signals: List[Dict], news_summary: str, market_sentiment: Dict):
         """Відправити сильні сигнали"""
@@ -280,8 +220,8 @@ class SignalProcessor:
                 'hold_signals': len([a for a in all_analyses if a.get('recommendation') == 'HOLD'])
             }
             
-            # Отримуємо огляд від ChatGPT
-            overview_text = self.chatgpt_analyzer.get_market_overview(all_analyses)
+            # Створюємо простий огляд без ChatGPT
+            overview_text = self._create_simple_market_overview(all_analyses, statistics)
             
             # Відправляємо огляд
             await self.telegram_bot.send_market_overview(overview_text, statistics)
@@ -291,6 +231,49 @@ class SignalProcessor:
             
         except Exception as e:
             print(f"❌ Помилка відправки огляду ринку: {e}")
+    
+    def _create_simple_market_overview(self, all_analyses: List[Dict], statistics: Dict) -> str:
+        """Створити простий огляд ринку без ChatGPT"""
+        
+        total_pairs = statistics['total_pairs']
+        buy_signals = statistics['buy_signals']
+        sell_signals = statistics['sell_signals']
+        hold_signals = statistics['hold_signals']
+        
+        # Знаходимо найкращі можливості
+        best_opportunities = sorted(
+            [a for a in all_analyses if a.get('recommendation') in ['BUY', 'SELL']],
+            key=lambda x: x.get('confidence', 0),
+            reverse=True
+        )[:3]
+        
+        overview = f"""
+📊 **Огляд крипто ринку**
+
+🔍 **Проаналізовано:** {total_pairs} торгових пар
+📈 **BUY сигнали:** {buy_signals}
+📉 **SELL сигнали:** {sell_signals}
+⏸️ **HOLD сигнали:** {hold_signals}
+
+🎯 **Найкращі можливості:**
+"""
+        
+        for i, opp in enumerate(best_opportunities, 1):
+            symbol = opp['symbol']
+            recommendation = opp['recommendation']
+            confidence = opp['confidence']
+            price = opp['entry_price']
+            
+            emoji = "🟢" if recommendation == "BUY" else "🔴"
+            overview += f"{i}. {emoji} **{symbol}** - {recommendation} ({confidence:.0%})\n"
+            overview += f"   💰 Ціна: ${price:,.2f}\n"
+        
+        if not best_opportunities:
+            overview += "   Наразі немає сильних сигналів\n"
+        
+        overview += f"\n⏰ **Час аналізу:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        
+        return overview
     
     def _should_send_market_overview(self) -> bool:
         """Перевірити чи потрібно відправити огляд ринку"""
@@ -327,13 +310,13 @@ class SignalProcessor:
             news_summary = self.news_aggregator.get_news_summary()
             market_sentiment = self.news_aggregator.get_sentiment_analysis()
             
-            # ChatGPT аналіз
-            chatgpt_analysis = self.chatgpt_analyzer.analyze_trading_opportunity(
-                symbol, technical_analysis, news_summary, market_sentiment
+            # Створюємо аналіз
+            analysis = self._create_analysis_without_chatgpt(
+                symbol, technical_analysis, market_sentiment
             )
             
             # Відправляємо сигнал
-            await self.telegram_bot.send_trading_signal(chatgpt_analysis, news_summary, market_sentiment)
+            await self.telegram_bot.send_trading_signal(analysis, news_summary, market_sentiment)
             
             print(f"✅ Ручний аналіз для {symbol} відправлено")
             

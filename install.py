@@ -36,7 +36,43 @@ def install_requirements():
         print("❌ Файл requirements.txt не знайдено")
         return False
     
-    return run_command("pip install -r requirements.txt", "Встановлення залежностей")
+    # Спочатку пробуємо основні залежності
+    print("🔧 Встановлення основних залежностей...")
+    if run_command("pip install -r requirements.txt", "Встановлення залежностей"):
+        return True
+    
+    # Якщо не вдалося, пробуємо Windows-оптимізовані
+    print("⚠️ Основні залежності не встановилися, пробуємо Windows-версію...")
+    if Path("requirements-windows.txt").exists():
+        if run_command("pip install -r requirements-windows.txt", "Встановлення Windows-залежностей"):
+            return True
+    
+    # Якщо і це не спрацювало, встановлюємо по одній
+    print("⚠️ Пробуємо встановити залежності по одній...")
+    basic_packages = [
+        "fastapi==0.104.1",
+        "uvicorn==0.24.0", 
+        "python-binance==1.0.19",
+        "aiogram==3.2.0",
+        "openai==1.3.7",
+        "requests==2.31.0",
+        "python-dotenv==1.0.0",
+        "beautifulsoup4==4.12.2",
+        "feedparser==6.0.10",
+        "aiohttp==3.9.1"
+    ]
+    
+    for package in basic_packages:
+        if not run_command(f"pip install {package}", f"Встановлення {package.split('==')[0]}"):
+            print(f"⚠️ Не вдалося встановити {package}, продовжуємо...")
+    
+    # Спробуємо встановити numpy та pandas окремо
+    print("🔧 Встановлення numpy та pandas...")
+    run_command("pip install numpy==1.24.4", "Встановлення numpy")
+    run_command("pip install pandas==2.1.4", "Встановлення pandas")
+    run_command("pip install ta==0.10.2", "Встановлення ta")
+    
+    return True
 
 def create_env_file():
     """Створити .env файл"""

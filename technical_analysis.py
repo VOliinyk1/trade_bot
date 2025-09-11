@@ -50,10 +50,21 @@ class TechnicalAnalyzer:
     
     def calculate_volume_indicators(self, df):
         """Розрахувати об'ємні індикатори"""
-        return {
-            'volume_sma': ta.volume.VolumeSMAIndicator(df['close'], df['volume']).volume_sma(),
-            'volume_ema': ta.volume.VolumeEMAIndicator(df['close'], df['volume']).volume_ema()
-        }
+        try:
+            # Використовуємо простіші об'ємні індикатори
+            volume_sma = df['volume'].rolling(window=20).mean()
+            volume_ema = df['volume'].ewm(span=20).mean()
+            
+            return {
+                'volume_sma': volume_sma,
+                'volume_ema': volume_ema
+            }
+        except Exception as e:
+            print(f"Помилка розрахунку об'ємних індикаторів: {e}")
+            return {
+                'volume_sma': df['volume'],
+                'volume_ema': df['volume']
+            }
     
     def calculate_support_resistance(self, df):
         """Знайти рівні підтримки та опору"""

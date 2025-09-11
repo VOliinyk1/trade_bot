@@ -11,12 +11,13 @@ class ChatGPTAnalyzer:
     def analyze_trading_opportunity(self, symbol: str, technical_data: Dict, news_data: str, market_sentiment: Dict) -> Dict:
         """Аналізувати торгову можливість з ChatGPT"""
         
-        # Формуємо промпт для ChatGPT
-        prompt = self._create_analysis_prompt(symbol, technical_data, news_data, market_sentiment)
-        
+        # Спочатку пробуємо ChatGPT
         try:
+            # Формуємо промпт для ChatGPT
+            prompt = self._create_analysis_prompt(symbol, technical_data, news_data, market_sentiment)
+            
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-3.5-turbo",
                 messages=[
                     {
                         "role": "system",
@@ -42,7 +43,8 @@ class ChatGPTAnalyzer:
             
         except Exception as e:
             print(f"Помилка аналізу ChatGPT для {symbol}: {e}")
-            return self._get_fallback_analysis(symbol, technical_data)
+            # Використовуємо розширений fallback аналіз
+            return self._get_enhanced_fallback_analysis(symbol, technical_data, market_sentiment)
     
     def _create_analysis_prompt(self, symbol: str, technical_data: Dict, news_data: str, market_sentiment: Dict) -> str:
         """Створити промпт для аналізу"""
@@ -188,6 +190,81 @@ class ChatGPTAnalyzer:
         
         return analysis
     
+    def _get_enhanced_fallback_analysis(self, symbol: str, technical_data: Dict, market_sentiment: Dict) -> Dict:
+        """Розширений fallback аналіз з урахуванням сентименту"""
+        
+        recommendation = technical_data.get('recommendation', 'HOLD')
+        current_price = technical_data.get('current_price', 0)
+        signal_strength = technical_data.get('signal_strength', 0)
+        trend = technical_data.get('trend', 'NEUTRAL')
+        
+        # Аналізуємо сентимент ринку
+        sentiment_score = market_sentiment.get('score', 0)
+        sentiment = market_sentiment.get('sentiment', 'NEUTRAL')
+        
+        # Визначаємо рівень ризику
+        if signal_strength >= 3 and sentiment == 'POSITIVE':
+            risk_level = 'LOW'
+            confidence = 0.7
+            position_size = 0.15
+        elif signal_strength >= 2:
+            risk_level = 'MEDIUM'
+            confidence = 0.5
+            position_size = 0.1
+        else:
+            risk_level = 'HIGH'
+            confidence = 0.3
+            position_size = 0.05
+        
+        # Корегуємо рекомендацію на основі сентименту
+        if sentiment == 'NEGATIVE' and recommendation == 'BUY':
+            recommendation = 'HOLD'
+            confidence *= 0.7
+        elif sentiment == 'POSITIVE' and recommendation == 'SELL':
+            recommendation = 'HOLD'
+            confidence *= 0.7
+        
+        # Розраховуємо ціни
+        if recommendation == 'BUY':
+            stop_loss = current_price * 0.95  # -5%
+            take_profit = current_price * 1.10  # +10%
+        elif recommendation == 'SELL':
+            stop_loss = current_price * 1.05  # +5%
+            take_profit = current_price * 0.90  # -10%
+        else:
+            stop_loss = current_price
+            take_profit = current_price
+        
+        # Формуємо обґрунтування
+        reasoning_parts = []
+        reasoning_parts.append(f"Технічний аналіз: {recommendation}")
+        reasoning_parts.append(f"Тренд: {trend}")
+        reasoning_parts.append(f"Сила сигналу: {signal_strength}")
+        reasoning_parts.append(f"Сентимент ринку: {sentiment} ({sentiment_score:.2f})")
+        
+        if signal_strength >= 3:
+            reasoning_parts.append("Сильні технічні сигнали")
+        if sentiment == 'POSITIVE':
+            reasoning_parts.append("Позитивний сентимент ринку")
+        elif sentiment == 'NEGATIVE':
+            reasoning_parts.append("Негативний сентимент ринку")
+        
+        reasoning = ". ".join(reasoning_parts) + "."
+        
+        analysis = {
+            'symbol': symbol,
+            'recommendation': recommendation,
+            'risk_level': risk_level,
+            'position_size': position_size,
+            'entry_price': current_price,
+            'stop_loss': stop_loss,
+            'take_profit': take_profit,
+            'reasoning': reasoning,
+            'confidence': confidence
+        }
+        
+        return analysis
+    
     def get_market_overview(self, all_analyses: List[Dict]) -> str:
         """Отримати загальний огляд ринку"""
         
@@ -220,7 +297,7 @@ class ChatGPTAnalyzer:
             """
             
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-3.5-turbo",
                 messages=[
                     {
                         "role": "system",
